@@ -23,7 +23,7 @@
         onAdd: function(map) {
             this._map = map;
             var pane = this.getPane ? this.getPane() : map.getPanes().markerPane;
-            var el = this._element = L.DomUtil.create('div', 'leaflet-zoom-animated leaflet-measure-path-measurement', pane);
+            var el = this._element = L.DomUtil.create('div', 'leaflet-zoom-animated leaflet-measure-path-measurement gis-themeaware ' + (map.baseLayerTheme === 'dark' ? 'gis-theme-dark' : 'gis-theme-light'), pane);
             var inner = L.DomUtil.create('div', '', el);
             inner.title = this._title;
             inner.innerHTML = this._measurement;
@@ -72,9 +72,9 @@
         } else {
             if (d > 1000) {
                 d = d / 1000;
-                unit = 'km';
+                unit = 'км';
             } else {
-                unit = 'm';
+                unit = 'м';
             }
         }
 
@@ -108,15 +108,18 @@
                 unit = 'm²';
             }
         } else {
-            if (a > 1000000) {
+            // Added by Andrey (Previous value: 1000000)
+            if (a > 100000) {
                 a = a / 1000000;
-                unit = 'km²';
+                unit = 'км²';
             } else {
-                unit = 'm²';
+                unit = 'м²';
             }
         }
 
-        if (a < 100) {
+        if (a < 1) {
+            return a.toFixed(2) + ' ' + unit;
+        } else if(a < 100) {
             return a.toFixed(1) + ' ' + unit;
         } else {
             return Math.round(a) + ' ' + unit;
@@ -192,7 +195,7 @@
                 var originalReturnValue = method.apply(this, arguments);
                 var args = Array.prototype.slice.call(arguments)
                 args.push(originalReturnValue);
-                return fn.apply(this, args);
+                return fn.apply(this, arguments);
             }
         } else {
             return function() {
@@ -201,9 +204,8 @@
             }
         }
     };
-
-    L.Polyline.include({
-        showMeasurements: function(options) {
+    var PathMeasurementsMixin = {
+        showMeasurements: function (options) {
             if (!this._map || this._measurementLayer) return this;
 
             this._measurementOptions = L.extend({
@@ -211,7 +213,6 @@
                 minPixelDistance: 30,
                 showDistances: true,
                 showArea: true,
-                showTotalDistance: true,
                 lang: {
                     totalLength: 'Total length',
                     totalArea: 'Total area',
@@ -227,7 +228,7 @@
             return this;
         },
 
-        hideMeasurements: function() {
+        hideMeasurements: function () {
             if (!this._map) return this;
 
             this._map.off('zoomend', this.updateMeasurements, this);
@@ -239,28 +240,30 @@
             return this;
         },
 
-        onAdd: override(L.Polyline.prototype.onAdd, function(originalReturnValue) {
-            var showOnHover = this.options.measurementOptions && this.options.measurementOptions.showOnHover;
-            if (this.options.showMeasurements && !showOnHover) {
-                this.showMeasurements(this.options.measurementOptions);
+        onAdd: override(L.EditableGisPolyline.prototype.onAdd, function (originalReturnValue) {
+            if (this.options && !this.options.noMeasurements) { 
+                var showOnHover = this.options.measurementOptions && this.options.measurementOptions.showOnHover;
+                if (this.options.showMeasurements && !showOnHover) {
+                    this.showMeasurements(this.options.measurementOptions);
+                    }
             }
 
             return originalReturnValue;
         }),
 
-        onRemove: override(L.Polyline.prototype.onRemove, function(originalReturnValue) {
+        onRemove: override(L.Polyline.prototype.onRemove, function (originalReturnValue) {
             this.hideMeasurements();
 
             return originalReturnValue;
         }, true),
 
-        setLatLngs: override(L.Polyline.prototype.setLatLngs, function(originalReturnValue) {
+        setLatLngs: override(L.Polyline.prototype.setLatLngs, function (originalReturnValue) {
             this.updateMeasurements();
 
             return originalReturnValue;
-        }),
+        }, true),
 
-        spliceLatLngs: override(L.Polyline.prototype.spliceLatLngs, function(originalReturnValue) {
+        spliceLatLngs: override(L.Polyline.prototype.spliceLatLngs, function (originalReturnValue) {
             this.updateMeasurements();
 
             return originalReturnValue;
@@ -268,6 +271,8 @@
 
         formatDistance: formatDistance,
         formatArea: formatArea,
+        declination: [],
+        requestInProgress: false,
 
         updateMeasurements: function() {
             if (!this._measurementLayer) return this;
@@ -290,6 +295,12 @@
                 latLngs = latLngs[0];
             }
 
+            if (latLngs && L.Util.isArray(latLngs) && latLngs.length >= 2) {
+                const mapBounds = this._map.getBounds();
+                const layerBounds = L.latLngBounds(latLngs);
+                const invisible = !mapBounds.intersects(layerBounds);
+                if (invisible) return this;
+            }
             this._measurementLayer.clearLayers();
 
             if (this._measurementOptions.showDistances && latLngs.length > 1) {
@@ -315,15 +326,35 @@
                 }
 
                 // Show total length for polylines
-                if (!isPolygon && this._measurementOptions.showTotalDistance) {
-                    L.marker.measurement(ll2, formatter(totalDist), options.lang.totalLength, 0, options)
-                        .addTo(this._measurementLayer);
+                if (!isPolygon) {
+                    if (latLngs.length > 2) {
+                        L.marker.measurement(ll2, formatter(totalDist), options.lang.totalLength, 0, options)
+                            .addTo(this._measurementLayer);
+                    }
+                    else {
+                        // Andrey: if points == 2 - show degrees instead of distance
+                        let tmpAngle = this._getLineAngle(latLngs[0], latLngs[1]);
+                        let declination = this._getDeclination(latLngs[0]);
+                        if (!declination) {
+                            L.marker.measurement(ll2, formatter(totalDist) + ', ' + Math.round(tmpAngle) + '°', options.lang.totalLength, 0, options)
+                                .addTo(this._measurementLayer);
+                        }
+                        else {
+                            let correctedAngle = tmpAngle - declination;
+                            if (Math.round(correctedAngle) < 0) correctedAngle += 360;
+                            if (Math.round(correctedAngle) > 360) correctedAngle -= 360;
+
+                            L.marker.measurement(ll2, formatter(totalDist) + ', ' + Math.round(tmpAngle) + `° (магн. ${Math.round(correctedAngle)}°)`, options.lang.totalLength, 0, options)
+                                .addTo(this._measurementLayer);
+                        }
+                    }
                 }
             }
 
             if (isPolygon && options.showArea && latLngs.length > 2) {
                 formatter = options.formatArea || L.bind(this.formatArea, this);
                 var area = ringArea(latLngs);
+                //getBounds() updated only after setBounds(). We either will have stuck area or will get stack overflow exception. Bug #472
                 L.marker.measurement(this.getBounds().getCenter(),
                     formatter(area), options.lang.totalArea, 0, options)
                     .addTo(this._measurementLayer);
@@ -337,14 +368,70 @@
                 p2 = this._map.project(ll2);
 
             return Math.atan((p2.y - p1.y) / (p2.x - p1.x));
-        }
-    });
+        },
 
-    L.Polyline.addInitHook(function() {
+        // Added by Andrey - get Angle for line
+        _getLineAngle: function (start, end) {
+            let p1 = this._map.project(start);
+            let p2 = this._map.project(end);
+            let tmpAngle = Math.atan2(p2.y - p1.y, p2.x - p1.x) * 180 / Math.PI + 180;
+            if (Math.round(tmpAngle) >= 90) {
+                return (tmpAngle - 90);
+            }
+            else {
+                return (270 + tmpAngle);
+            }
+        },
+
+        _getDeclination: function (start) {
+            if (!(window && window.PageModel && window.PageModel.backendAddress)) return;
+            if (!navigator.onLine) return;
+
+            const lat = Math.round(start.lat);
+            const lng = Math.round(start.lng);
+            let cache = this.declination;
+            var cacheMatch = cache.filter(d => d.lat === lat && d.lng === lng);
+            let layer = this;
+            if (cacheMatch.length > 0) return cacheMatch[0].declination;
+
+            try {
+                if (this.requestInProgress) return;
+                this.requestInProgress = true;
+                const xmlhttp = new XMLHttpRequest();
+                xmlhttp.open("GET", `${window.PageModel.backendAddress}/magneticdeclination/noaa/${lat}/${lng}`, true);
+                xmlhttp.setRequestHeader("Content-type", "application/json");
+                xmlhttp.withCredentials = true;
+                xmlhttp.send();
+                xmlhttp.onreadystatechange = function () {
+                    if (xmlhttp.readyState == 4 && xmlhttp.status == 200) {
+                        try {
+                            const cacheValue = new L.latLng(lat, lng);
+                            cacheValue.declination = Number.parseFloat(xmlhttp.response);
+                            cache.push(cacheValue);
+                            this.requestInProgress = false;
+                            layer.updateMeasurements();
+                        } catch (err) {
+                            console.warn(err);
+                            this.requestInProgress = false;
+                        }
+                    }
+                }
+            } catch (err) {
+                this.requestInProgress = false;
+            }
+        }
+    };
+    L.EditableGisPolyline.include(PathMeasurementsMixin);
+    L.EditableGisPolyline.addInitHook(function() {
         addInitHook.call(this);
     });
 
-    L.Circle.include({
+    L.EditableGisPolygon.include(PathMeasurementsMixin);
+    L.EditableGisPolygon.addInitHook(function() {
+        addInitHook.call(this);
+    });
+
+    L.EditableGisCircle.include({
         showMeasurements: function(options) {
             if (!this._map || this._measurementLayer) return this;
 
@@ -376,7 +463,7 @@
             return this;
         },
 
-        onAdd: override(L.Circle.prototype.onAdd, function(originalReturnValue) {
+        onAdd: override(L.EditableGisCircle.prototype.onAdd, function(originalReturnValue) {
             var showOnHover = this.options.measurementOptions && this.options.measurementOptions.showOnHover;
             if (this.options.showMeasurements && !showOnHover) {
                 this.showMeasurements(this.options.measurementOptions);
@@ -395,13 +482,13 @@
             this.updateMeasurements();
 
             return originalReturnValue;
-        }),
+        },true),
 
         setRadius: override(L.Circle.prototype.setRadius, function(originalReturnValue) {
             this.updateMeasurements();
 
             return originalReturnValue;
-        }),
+        },true),
 
         formatArea: formatArea,
 
@@ -417,14 +504,15 @@
             if (options.showArea) {
                 formatter = options.formatArea || L.bind(this.formatArea, this);
                 var area = circleArea(this.getRadius());
+                // Added radius formatter for Circles
                 L.marker.measurement(latLng,
-                    formatter(area), options.lang.totalArea, 0, options)
+                    'R = ' + Math.ceil(this.getRadius()) + 'm, S = ' + formatter(area), options.lang.totalArea, 0, options)
                     .addTo(this._measurementLayer);
             }
         }
     })
 
-    L.Circle.addInitHook(function() {
+    L.EditableGisCircle.addInitHook(function() {
         addInitHook.call(this);
     });
 })();

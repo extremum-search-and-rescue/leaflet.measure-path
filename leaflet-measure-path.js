@@ -29,12 +29,13 @@
             inner.innerHTML = this._measurement;
 
             map.on('zoomanim', this._animateZoom, this);
-
+            map.on('viewreset', this._setPosition, this);
             this._setPosition();
         },
 
         onRemove: function(map) {
             map.off('zoomanim', this._animateZoom, this);
+            map.off('viewreset', this._setPosition, this);
             var pane = this.getPane ? this.getPane() : map.getPanes().markerPane;
             pane.removeChild(this._element);
             this._map = null;

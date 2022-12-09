@@ -185,10 +185,6 @@
         }
     };
 
-    var circleArea = function circleArea(d) {
-        var rho = d / RADIUS;
-        return 2 * Math.PI * RADIUS * RADIUS * (1 - Math.cos(rho));
-    };
 
     var override = function(method, fn, hookAfter) {
         if (!hookAfter) {
@@ -429,91 +425,6 @@
 
     L.EditableGisPolygon.include(PathMeasurementsMixin);
     L.EditableGisPolygon.addInitHook(function() {
-        addInitHook.call(this);
-    });
-
-    L.EditableGisCircle.include({
-        showMeasurements: function(options) {
-            if (!this._map || this._measurementLayer) return this;
-
-            this._measurementOptions = L.extend({
-                showOnHover: false,
-                showArea: true,
-                lang: {
-                    totalArea: 'Total area',
-                }
-            }, options || {});
-
-            this._measurementLayer = L.layerGroup().addTo(this._map);
-            this.updateMeasurements();
-
-            this._map.on('zoomend', this.updateMeasurements, this);
-
-            return this;
-        },
-
-        hideMeasurements: function() {
-            if (!this._map) return this;
-
-            this._map.on('zoomend', this.updateMeasurements, this);
-
-            if (!this._measurementLayer) return this;
-            this._map.removeLayer(this._measurementLayer);
-            this._measurementLayer = null;
-
-            return this;
-        },
-
-        onAdd: override(L.EditableGisCircle.prototype.onAdd, function(originalReturnValue) {
-            var showOnHover = this.options.measurementOptions && this.options.measurementOptions.showOnHover;
-            if (this.options.showMeasurements && !showOnHover) {
-                this.showMeasurements(this.options.measurementOptions);
-            }
-
-            return originalReturnValue;
-        }),
-
-        onRemove: override(L.Circle.prototype.onRemove, function(originalReturnValue) {
-            this.hideMeasurements();
-
-            return originalReturnValue;
-        }, true),
-
-        setLatLng: override(L.Circle.prototype.setLatLng, function(originalReturnValue) {
-            this.updateMeasurements();
-
-            return originalReturnValue;
-        },true),
-
-        setRadius: override(L.Circle.prototype.setRadius, function(originalReturnValue) {
-            this.updateMeasurements();
-
-            return originalReturnValue;
-        },true),
-
-        formatArea: formatArea,
-
-        updateMeasurements: function() {
-            if (!this._measurementLayer) return;
-
-            var latLng = this.getLatLng(),
-                options = this._measurementOptions,
-                formatter = options.formatArea || L.bind(this.formatArea, this);
-
-            this._measurementLayer.clearLayers();
-
-            if (options.showArea) {
-                formatter = options.formatArea || L.bind(this.formatArea, this);
-                var area = circleArea(this.getRadius());
-                // Added radius formatter for Circles
-                L.marker.measurement(latLng,
-                    'R = ' + Math.ceil(this.getRadius()) + 'm, S = ' + formatter(area), options.lang.totalArea, 0, options)
-                    .addTo(this._measurementLayer);
-            }
-        }
-    })
-
-    L.EditableGisCircle.addInitHook(function() {
         addInitHook.call(this);
     });
 })();

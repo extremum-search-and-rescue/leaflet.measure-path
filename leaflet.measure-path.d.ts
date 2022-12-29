@@ -19,6 +19,7 @@
         imperial?: boolean;
         formatArea?: (area: number) => string;
         showMeasurements?: boolean;
+        noMeasurements?: boolean;
         showOnHover?: boolean;
         minPixelDistance?: number;
         showDistances?: boolean;

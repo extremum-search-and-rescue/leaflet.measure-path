@@ -398,6 +398,7 @@
                 xmlhttp.open("GET", `${window.PageModel.backendAddress}/magneticdeclination/noaa/${lat}/${lng}`, true);
                 xmlhttp.setRequestHeader("Content-type", "application/json");
                 xmlhttp.withCredentials = true;
+                xmlhttp.timeout = 5000;
                 xmlhttp.send();
                 xmlhttp.onreadystatechange = function () {
                     if (xmlhttp.readyState == 4 && xmlhttp.status == 200) {
